@@ -30,18 +30,22 @@ dependencies {
 
     compileOnly("com.google.guava:guava:33.3.1-jre")
     testImplementation("org.junit.jupiter:junit-jupiter:5.7.1")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("com.google.guava:guava:33.3.1-jre")
 }
 
-//tasks.named<Test>("test") {
-//    useJUnitPlatform()
-//
-//    maxHeapSize = "1G"
-//
-//    testLogging {
-//        events("passed")
-//    }
-//}
+tasks.named<Test>("test") {
+    useJUnitPlatform()
+
+    maxHeapSize = "1G"
+
+    // SDKTest requires live Tebex API credentials and should not block local builds.
+    exclude("io/tebex/sdk/SDKTest.class")
+
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
+}
 
 tasks.withType<JavaCompile> {
     options.compilerArgs.addAll(listOf("-Xlint:deprecation", "-Xlint:unchecked"))

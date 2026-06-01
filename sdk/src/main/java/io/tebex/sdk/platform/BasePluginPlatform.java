@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
 import static io.tebex.sdk.util.ResourceUtil.getBundledFile;
@@ -49,6 +50,7 @@ public abstract class BasePluginPlatform implements PluginPlatform {
 
     private final ArrayList<PluginEvent> PLUGIN_EVENTS = new ArrayList<>();
     private final AtomicBoolean commandCheckInProgress = new AtomicBoolean(false);
+    private final AtomicLong nextCommandCheckAtMillis = new AtomicLong(0L);
     private final AtomicBoolean floodgateWarningLogged = new AtomicBoolean(false);
     private final Map<String, UUID> resolvedFloodgateIds = Maps.newConcurrentMap();
 
@@ -114,19 +116,36 @@ public abstract class BasePluginPlatform implements PluginPlatform {
         checkCommandQueue(true);
     }
 
+    public final void performCheckIfDue() {
+        if (!isSetup()) {
+            return;
+        }
+
+        long nextCheckAt = nextCommandCheckAtMillis.get();
+        if (nextCheckAt <= 0L || System.currentTimeMillis() >= nextCheckAt) {
+            performCheck();
+        }
+    }
+
+    private void scheduleNextCommandCheck(long time, TimeUnit unit) {
+        long delayMillis = Math.max(0L, unit.toMillis(time));
+        nextCommandCheckAtMillis.set(System.currentTimeMillis() + delayMillis);
+        executeAsyncLater(this::performCheck, time, unit);
+    }
+
     public final CompletableFuture<String[]> checkCommandQueue(boolean useRemoteNextCheck) {
         CompletableFuture<String[]> forceCheckOutput = new CompletableFuture<>();
 
         if(!isSetup()) {
             debug("Tebex is not set up. Skipping check.");
-            executeAsyncLater(this::performCheck, 1, TimeUnit.MINUTES);
+            scheduleNextCommandCheck(1, TimeUnit.MINUTES);
             return forceCheckOutput;
         }
 
         if (!commandCheckInProgress.compareAndSet(false, true)) {
             debug("Command queue check already in progress. Skipping to avoid duplicate execution.");
             if (useRemoteNextCheck) {
-                executeAsyncLater(this::performCheck, 60, TimeUnit.SECONDS);
+                scheduleNextCommandCheck(60, TimeUnit.SECONDS);
             }
             return forceCheckOutput;
         }
@@ -140,24 +159,24 @@ public abstract class BasePluginPlatform implements PluginPlatform {
                 if (ex.getMessage().contains("429")) { // handling for rate limits
                     warning("Failed to get due players: Rate Limit", "We will try again after 5 minutes.", ex);
                     output.add("Failed to get due players: Rate Limit. We will try again after 5 minutes.");
-                    executeAsyncLater(this::performCheck, 5, TimeUnit.MINUTES);
+                    scheduleNextCommandCheck(5, TimeUnit.MINUTES);
                 } else if (ex.getMessage().contains("403")) {
                     warning("Failed to get due players: Forbidden", "Please check your secret key and run `/tebex.forcecheck` to try again. We will wait 30 minutes before trying again.", ex);
                     output.add("Failed to get due players: Forbidden. Please check your secret key and run `/tebex.forcecheck` to try again. We will wait 30 minutes before trying again.");
-                    executeAsyncLater(this::performCheck, 30, TimeUnit.MINUTES);
+                    scheduleNextCommandCheck(30, TimeUnit.MINUTES);
                 } else { // unexpected status code
                     warning("Failed to get due players: " + ex.getMessage(), "We will try again at the next due player check.", ex);
                     output.add("Failed to get due players: '" + ex.getMessage() + "'. We will try again at the next due player check.");
-                    executeAsyncLater(this::performCheck, 1, TimeUnit.MINUTES);
+                    scheduleNextCommandCheck(1, TimeUnit.MINUTES);
                 }
                 commandCheckInProgress.set(false);
-                forceCheckOutput.complete((String[]) output.toArray());
+                forceCheckOutput.complete(output.toArray(new String[0]));
                 return;
             }
 
             if (useRemoteNextCheck) {
                 int nextCheck = duePlayersResponse == null ? 60 : duePlayersResponse.getNextCheck();
-                executeAsyncLater(this::performCheck, nextCheck, TimeUnit.SECONDS);
+                scheduleNextCommandCheck(nextCheck, TimeUnit.SECONDS);
             }
 
             List<QueuedPlayer> playerList = duePlayersResponse.getPlayers();

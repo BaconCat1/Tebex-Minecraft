@@ -22,6 +22,7 @@ import net.kyori.adventure.text.Component;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -66,6 +67,14 @@ public class TebexVelocityPlugin extends BasePluginPlatform {
         new CommandManager(this).register();
         placeholderManager.registerDefaults();
         proxy.getEventManager().register(this, new JoinListener(this));
+
+        // Keep Velocity queue checks alive even if a one-shot delayed scheduler task is missed.
+        // The SDK tracks the remote next_check timestamp, so this watchdog only polls when due.
+        proxy.getScheduler()
+                .buildTask(this, this::performCheckIfDue)
+                .delay(1, TimeUnit.MINUTES)
+                .repeat(1, TimeUnit.MINUTES)
+                .schedule();
 
         // Clear server events every minute
         proxy.getScheduler()
@@ -153,11 +162,14 @@ public class TebexVelocityPlugin extends BasePluginPlatform {
     public <T> T getPlayer(Object uuidOrUsername) {
         if(uuidOrUsername == null) return null;
 
+        Optional<Player> player;
         if (isOnlineMode() && !isGeyser() && uuidOrUsername instanceof UUID) {
-            return (T)proxy.getPlayer(uuidOrUsername.toString());
+            player = proxy.getPlayer((UUID) uuidOrUsername);
+        } else {
+            player = proxy.getPlayer(uuidOrUsername.toString());
         }
 
-        return (T)proxy.getPlayer((String) uuidOrUsername);
+        return (T) player.orElse(null);
     }
 
     @Override

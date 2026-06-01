@@ -1,7 +1,7 @@
 package io.tebex.plugin.event;
 
 import com.velocitypowered.api.event.Subscribe;
-import com.velocitypowered.api.event.connection.LoginEvent;
+import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.proxy.Player;
 import io.tebex.plugin.TebexVelocityPlugin;
 import io.tebex.sdk.obj.QueuedPlayer;
@@ -14,7 +14,7 @@ public class JoinListener {
     }
 
     @Subscribe
-    public void onPlayerConnect(LoginEvent event) {
+    public void onPlayerConnect(PostLoginEvent event) {
         Player player = event.getPlayer();
 
         Object playerId = plugin.getPlayerId(player.getUsername(), player.getUniqueId());
